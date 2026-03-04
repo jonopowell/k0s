@@ -244,3 +244,17 @@ resource "azurerm_relay_hybrid_connection" "main" {
   relay_namespace_name = azurerm_relay_namespace.main.name
   resource_group_name  = azurerm_resource_group.main.name
 }
+
+resource "azurerm_dev_test_global_vm_shutdown_schedule" "main" {
+  count              = 3
+  virtual_machine_id = azurerm_linux_virtual_machine.main[count.index].id
+  location           = azurerm_resource_group.main.location
+  enabled            = true
+
+  daily_recurrence_time = "0000"
+  timezone              = "UTC"
+
+  notification_settings {
+    enabled = false
+  }
+}
