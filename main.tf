@@ -16,21 +16,15 @@ provider "azurerm" {
   features {}
 }
 
-resource "random_string" "rg_name" {
-  length           = 5
-  special          = true
-  override_special = "/@£$"
-}
-
 resource "azurerm_resource_group" "main" {
-  name     = join("",["rg-aqu" , random_string.rg_name.id])
+  name     = "rg-aquuks-k0s"
   location = var.location
 }
 
 resource "azurerm_virtual_network" "main" {
   name                = "vnet-k0s"
-  # address_space       = ["10.0.0.0/16","fd00::/8"]
-  address_space       = ["10.0.0.0/16"]
+  address_space       = ["10.0.0.0/16","fd00::/8"]
+
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
 }
@@ -39,8 +33,70 @@ resource "azurerm_subnet" "main" {
   name                 = "snet-k0s"
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.main.name
-  # address_prefixes     = ["10.0.1.0/24", "fd00:0:0:1:/64"]
-  address_prefixes = ["10.0.1.0/24"]
+  address_prefixes     = ["10.0.1.0/24", "fd00:0:0:1::/64"]
+}
+
+resource "azurerm_subnet" "cloudshell" {
+  name                 = "snet-cloudshell"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.2.0/24", "fd00:0:0:2::/64"]
+}
+
+
+resource "azurerm_network_security_group" "main" { 
+  name = "nsg-vnet-k0s" 
+  location = azurerm_resource_group.main.location 
+  resource_group_name = azurerm_resource_group.main.name 
+  security_rule { 
+    name = "Allow-SSH" 
+    priority = 100 
+    direction = "Inbound" 
+    access = "Allow" 
+    protocol = "Tcp" 
+    source_port_range = "*" 
+    destination_port_range = "22" 
+    source_address_prefixes = ["145.40.146.231"]
+    destination_address_prefix = "*" 
+  } 
+    security_rule { 
+    name = "Allow-SSH2" 
+    priority = 101 
+    direction = "Inbound" 
+    access = "Allow" 
+    protocol = "Tcp" 
+    source_port_range = "*" 
+    destination_port_range = "22" 
+    source_address_prefixes = ["2a0e:cb01:14c:a500::/64"]
+    destination_address_prefix = "*" 
+  } 
+  security_rule { 
+    name = "Allow-HTTPS" 
+    priority = 110 
+    direction = "Inbound" 
+    access = "Allow" 
+    protocol = "Tcp" 
+    source_port_range = "*" 
+    destination_port_range = "443" 
+    source_address_prefixes = ["145.40.146.231"]
+    destination_address_prefix = "*" 
+  }
+    security_rule { 
+    name = "Allow-HTTPS2" 
+    priority = 111 
+    direction = "Inbound" 
+    access = "Allow" 
+    protocol = "Tcp" 
+    source_port_range = "*" 
+    destination_port_range = "443" 
+    source_address_prefixes = ["2a0e:cb01:14c:a500::/64"]
+    destination_address_prefix = "*" 
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "main" { 
+  subnet_id = azurerm_subnet.main.id 
+  network_security_group_id = azurerm_network_security_group.main.id 
 }
 
 resource "tls_private_key" "ssh_key" {
@@ -64,8 +120,18 @@ resource "azurerm_network_interface" "main" {
   ip_configuration {
     name                          = "ipconfig"
     subnet_id                     = azurerm_subnet.main.id
-    private_ip_address_allocation = "Dynamic"
+    private_ip_address_allocation = "Static"
+    private_ip_address            = "10.0.1.${10 + count.index}"
     public_ip_address_id          = azurerm_public_ip.main[count.index].id
+  }
+
+  ip_configuration {
+    name                          = "ipv6"
+    subnet_id                     = azurerm_subnet.main.id
+    private_ip_address_allocation = "Static"
+    private_ip_address_version    = "IPv6"
+    private_ip_address            = "fd00:0:0:1::${10 + count.index}"
+    public_ip_address_id          = azurerm_public_ip.main_ipv6[count.index].id
   }
 }
 
@@ -76,6 +142,22 @@ resource "azurerm_public_ip" "main" {
   resource_group_name = azurerm_resource_group.main.name
   allocation_method   = "Static"
   sku                 = "Standard"
+  zones               = [count.index + 1]
+}
+
+resource "azurerm_public_ip" "main_ipv6" {
+  count               = 3
+  name                = "pip-vm-${count.index}-ipv6"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  allocation_method   = "Static"
+  sku                 = "Standard"
+
+  ip_version          = "IPv6"
+
+  # If your region supports IPv6 zones, keep this.
+  # If you get an error, remove the zones line.
   zones               = [count.index + 1]
 }
 
@@ -96,7 +178,7 @@ resource "azurerm_linux_virtual_machine" "main" {
 
   os_disk {
     caching              = "ReadWrite"
-    storage_account_type = "Standard_LRS"
+    storage_account_type = "StandardSSD_LRS"
   }
 
   source_image_reference {
@@ -105,4 +187,60 @@ resource "azurerm_linux_virtual_machine" "main" {
     sku       = "13-gen2"
     version   = "latest"
   }
+
+  custom_data = base64encode(file("${path.module}/${count.index == 0 ? "script-0.sh" : "script.sh"}"))
+}
+
+resource "random_string" "storage_account_name" {
+  length  = 10
+  special = false
+  upper   = false
+}
+
+resource "azurerm_storage_account" "main" {
+  name                     = "stk0s${random_string.storage_account_name.result}"
+  resource_group_name      = azurerm_resource_group.main.name
+  location                 = azurerm_resource_group.main.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+}
+
+resource "azurerm_storage_container" "tfstate" {
+  name                  = "tfstate"
+  storage_account_name  = azurerm_storage_account.main.name
+  container_access_type = "private"
+}
+
+resource "azurerm_storage_share" "main" {
+  name                 = "cloudshell"
+  storage_account_name = azurerm_storage_account.main.name
+  quota                = 50
+}
+
+resource "azurerm_network_profile" "main" {
+  name                = "np-cloudshell"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  
+  container_network_interface {
+    name = "cloudshell-nic"
+
+    ip_configuration {
+      name      = "cloudshell-ipconfig"
+      subnet_id = azurerm_subnet.cloudshell.id
+    }
+  }
+}
+
+resource "azurerm_relay_namespace" "main" {
+  name                = "rns-aquuks-clsh"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  sku_name            = "Standard"
+}
+
+resource "azurerm_relay_hybrid_connection" "main" {
+  name                = "cloudshell-hybrid"
+  relay_namespace_name = azurerm_relay_namespace.main.name
+  resource_group_name  = azurerm_resource_group.main.name
 }
