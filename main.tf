@@ -123,6 +123,7 @@ resource "azurerm_network_interface" "main" {
     private_ip_address_allocation = "Static"
     private_ip_address            = "10.0.1.${(regex("^.", each.key) == "c" ? 10: 20) + tonumber(regex("[0-9]+", each.key))}"
     public_ip_address_id          = azurerm_public_ip.main[each.key].id
+    primary                       = true
   }
 
   ip_configuration {
