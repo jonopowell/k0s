@@ -54,5 +54,5 @@ spec:
       controllerWorkers: false
 EOF
 
-k0sctl apply --config k0sctl.yaml
-k0sctl kubeconfig > kubeconfig
+# k0sctl apply --config k0sctl.yaml
+# k0sctl kubeconfig > kubeconfig

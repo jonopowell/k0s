@@ -258,3 +258,85 @@ resource "azurerm_dev_test_global_vm_shutdown_schedule" "main" {
     enabled = false
   }
 }
+
+resource "azurerm_lb" "control_plane" {
+  name                = "lb-k0s-control-plane"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  sku                 = "Standard"
+
+ frontend_ip_configuration {
+    name                          = "internal-frontend-ipv4"
+    subnet_id                     = azurerm_subnet.main.id
+    private_ip_address_allocation = "Static"
+    private_ip_address            = "10.0.1.9"
+  }
+
+ frontend_ip_configuration {
+    name                          = "internal-frontend-ipv6"
+    subnet_id                     = azurerm_subnet.main.id
+    private_ip_address_allocation = "Static"
+    private_ip_address_version    = "IPv6"
+    private_ip_address            = "fd00:0:0:1::9"
+  }
+}
+
+resource "azurerm_lb_backend_address_pool" "control_plane" {
+  loadbalancer_id = azurerm_lb.control_plane.id
+  name            = "bep-k0s-control-plane"
+}
+
+resource "azurerm_lb_backend_address_pool" "control_plane_v6" {
+  loadbalancer_id = azurerm_lb.control_plane.id
+  name            = "bep-k0s-control-plane-v6"
+}
+
+resource "azurerm_lb_probe" "control_plane" {
+ loadbalancer_id = azurerm_lb.control_plane.id
+ name            = "probe-k0s-api"
+ port            = 6443
+ protocol        = "Tcp"
+}
+
+resource "azurerm_lb_probe" "control_plane_v6" {
+ loadbalancer_id = azurerm_lb.control_plane.id
+ name            = "probe-k0s-api-v6"
+ port            = 6443
+ protocol        = "Tcp"
+}
+
+resource "azurerm_lb_rule" "control_plane_ipv4" {
+  loadbalancer_id                = azurerm_lb.control_plane.id
+  name                           = "rule-k0s-api-ipv4"
+  protocol                       = "Tcp"
+  frontend_port                  = 6443
+  backend_port                   = 6443
+  frontend_ip_configuration_name = "internal-frontend-ipv4"
+  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.control_plane.id]
+  probe_id                       = azurerm_lb_probe.control_plane.id
+}
+
+resource "azurerm_lb_rule" "control_plane_ipv6" {
+  loadbalancer_id                = azurerm_lb.control_plane.id
+  name                           = "rule-k0s-api-ipv6"
+  protocol                       = "Tcp"
+  frontend_port                  = 6443
+  backend_port                   = 6443
+  frontend_ip_configuration_name = "internal-frontend-ipv6"
+  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.control_plane_v6.id]
+  probe_id                       = azurerm_lb_probe.control_plane_v6.id
+}
+
+resource "azurerm_network_interface_backend_address_pool_association" "main" {
+  count                   = 3
+  network_interface_id    = azurerm_network_interface.main[count.index].id
+  ip_configuration_name   = "ipconfig"
+  backend_address_pool_id = azurerm_lb_backend_address_pool.control_plane.id
+}
+
+resource "azurerm_network_interface_backend_address_pool_association" "main_ipv6" {
+  count                   = 3
+  network_interface_id    = azurerm_network_interface.main[count.index].id
+  ip_configuration_name   = "ipv6"
+  backend_address_pool_id = azurerm_lb_backend_address_pool.control_plane_v6.id
+}
