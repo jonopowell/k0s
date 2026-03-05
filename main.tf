@@ -112,8 +112,8 @@ resource "azurerm_ssh_public_key" "main" {
 }
 
 resource "azurerm_network_interface" "main" {
-  count               = 3
-  name                = "nic-vm-${count.index}"
+  for_each            = toset(concat(var.cp-nodes,var.wk-nodes))
+  name                = "nic-vm-${each.key}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
 
@@ -121,8 +121,8 @@ resource "azurerm_network_interface" "main" {
     name                          = "ipconfig"
     subnet_id                     = azurerm_subnet.main.id
     private_ip_address_allocation = "Static"
-    private_ip_address            = "10.0.1.${10 + count.index}"
-    public_ip_address_id          = azurerm_public_ip.main[count.index].id
+    private_ip_address            = "10.0.1.${(regex("^.", each.key) == "c" ? 10: 20) + tonumber(regex("[0-9]+", each.key))}"
+    public_ip_address_id          = azurerm_public_ip.main[each.key].id
   }
 
   ip_configuration {
@@ -130,24 +130,24 @@ resource "azurerm_network_interface" "main" {
     subnet_id                     = azurerm_subnet.main.id
     private_ip_address_allocation = "Static"
     private_ip_address_version    = "IPv6"
-    private_ip_address            = "fd00:0:0:1::${10 + count.index}"
-    public_ip_address_id          = azurerm_public_ip.main_ipv6[count.index].id
+    private_ip_address            = "fd00:0:0:1::${(regex("^.", each.key) == "c" ? 10: 20)+ tonumber(regex("[0-9]+", each.key))}"
+    public_ip_address_id          = azurerm_public_ip.main_ipv6[each.key].id
   }
 }
 
 resource "azurerm_public_ip" "main" {
-  count               = 3
-  name                = "pip-vm-${count.index}"
+  for_each            = toset(concat(var.cp-nodes,var.wk-nodes))
+  name                = "pip-vm-${each.key}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   allocation_method   = "Static"
   sku                 = "Standard"
-  zones               = [count.index + 1]
+  zones               = [(tonumber(regex("[0-9]+", each.key)) % 3) + 1]
 }
 
 resource "azurerm_public_ip" "main_ipv6" {
-  count               = 3
-  name                = "pip-vm-${count.index}-ipv6"
+  for_each            = toset(concat(var.cp-nodes,var.wk-nodes))
+  name                = "pip-vm-${each.key}-ipv6"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
 
@@ -158,18 +158,18 @@ resource "azurerm_public_ip" "main_ipv6" {
 
   # If your region supports IPv6 zones, keep this.
   # If you get an error, remove the zones line.
-  zones               = [count.index + 1]
+  zones               = [(tonumber(regex("[0-9]+", each.key)) % 3) + 1]
 }
 
 resource "azurerm_linux_virtual_machine" "main" {
-  count                 = 3
-  name                  = "k0s-${count.index}"
+  for_each              = toset(concat(var.cp-nodes,var.wk-nodes))
+  name                  = "k0s-${each.key}"
   resource_group_name   = azurerm_resource_group.main.name
   location              = azurerm_resource_group.main.location
   size                  = "Standard_B1s"
   admin_username        = "adminuser"
-  network_interface_ids = [azurerm_network_interface.main[count.index].id]
-  zone                  = count.index + 1
+  network_interface_ids = [azurerm_network_interface.main[each.key].id]
+  zone                  = (tonumber(regex("[0-9]+", each.key)) % 3) + 1
 
   admin_ssh_key {
     username   = "adminuser"
@@ -188,7 +188,7 @@ resource "azurerm_linux_virtual_machine" "main" {
     version   = "latest"
   }
 
-  custom_data = base64encode(file("${path.module}/${count.index == 0 ? "script-0.sh" : "script.sh"}"))
+  custom_data = base64encode(file("${path.module}/${each.key == var.cp-nodes[0] ? "script-0.sh" : "script.sh"}"))
 }
 
 resource "random_string" "storage_account_name" {
@@ -246,8 +246,8 @@ resource "azurerm_relay_hybrid_connection" "main" {
 }
 
 resource "azurerm_dev_test_global_vm_shutdown_schedule" "main" {
-  count              = 3
-  virtual_machine_id = azurerm_linux_virtual_machine.main[count.index].id
+  for_each              = toset(concat(var.cp-nodes,var.wk-nodes))
+  virtual_machine_id = azurerm_linux_virtual_machine.main[each.key].id
   location           = azurerm_resource_group.main.location
   enabled            = true
 
@@ -306,37 +306,39 @@ resource "azurerm_lb_probe" "control_plane_v6" {
 }
 
 resource "azurerm_lb_rule" "control_plane_ipv4" {
+  for_each = toset(var.cp_ports)
   loadbalancer_id                = azurerm_lb.control_plane.id
-  name                           = "rule-k0s-api-ipv4"
+  name                           = "rule-k0s-api-ipv4-${each.key}"
   protocol                       = "Tcp"
-  frontend_port                  = 6443
-  backend_port                   = 6443
+  frontend_port                  = each.key
+  backend_port                   = each.key
   frontend_ip_configuration_name = "internal-frontend-ipv4"
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.control_plane.id]
   probe_id                       = azurerm_lb_probe.control_plane.id
 }
 
 resource "azurerm_lb_rule" "control_plane_ipv6" {
+  for_each = toset(var.cp_ports)
   loadbalancer_id                = azurerm_lb.control_plane.id
-  name                           = "rule-k0s-api-ipv6"
+  name                           = "rule-k0s-api-ipv6-${each.key}"
   protocol                       = "Tcp"
-  frontend_port                  = 6443
-  backend_port                   = 6443
+  frontend_port                  = each.key
+  backend_port                   = each.key
   frontend_ip_configuration_name = "internal-frontend-ipv6"
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.control_plane_v6.id]
   probe_id                       = azurerm_lb_probe.control_plane_v6.id
 }
 
 resource "azurerm_network_interface_backend_address_pool_association" "main" {
-  count                   = 3
-  network_interface_id    = azurerm_network_interface.main[count.index].id
+  for_each                = toset(var.cp-nodes)
+  network_interface_id    = azurerm_network_interface.main[each.key].id
   ip_configuration_name   = "ipconfig"
   backend_address_pool_id = azurerm_lb_backend_address_pool.control_plane.id
 }
 
 resource "azurerm_network_interface_backend_address_pool_association" "main_ipv6" {
-  count                   = 3
-  network_interface_id    = azurerm_network_interface.main[count.index].id
+  for_each                = toset(var.cp-nodes)
+  network_interface_id    = azurerm_network_interface.main[each.key].id
   ip_configuration_name   = "ipv6"
   backend_address_pool_id = azurerm_lb_backend_address_pool.control_plane_v6.id
 }

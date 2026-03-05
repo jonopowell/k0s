@@ -52,6 +52,11 @@ spec:
       taint: k0sctl.k0sproject.io/evict=true
       effect: NoExecute
       controllerWorkers: false
+  k0s:
+    config:
+      spec:
+        api:
+          externalAddress: 10.0.1.9
 EOF
 
 # k0sctl apply --config k0sctl.yaml

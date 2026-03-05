@@ -1,5 +1,5 @@
 output "public_ip_addresses" {
-  value = azurerm_public_ip.main.*.ip_address
+  value = [for ip in azurerm_public_ip.main : ip.ip_address]
 }
 
 output "private_key" {

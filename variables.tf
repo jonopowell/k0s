@@ -3,7 +3,17 @@ variable "location" {
   default     = "UK South"
 }
 
-variable "nodes" {
+variable "cp-nodes" {
   type = list(string)
-  default = ["c0","n0","n1"]
+  default = ["c0","c1"]
+}
+
+variable "wk-nodes" {
+  type = list(string)
+  default = ["n0","n1"]
+}
+
+variable "cp_ports" {
+  type = list(string)
+  default = [6443,8132,9443]
 }
